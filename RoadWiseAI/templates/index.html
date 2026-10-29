@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>RoadWise AI | Road Damage GIS</title>
+
+    <!-- Leaflet map styles -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
+    <!-- Application styles -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+
+<body>
+
+    <!-- Header -->
+    <header class="topbar">
+        <div>
+            <h1>RoadWise <span>AI</span></h1>
+            <p>Road Damage Detection &amp; Repair Prioritisation</p>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div id="auth-status-bar" style="display: flex; align-items: center; gap: 8px;">
+                <button type="button" id="btn-open-login" class="btn-secondary" style="font-size: 13px; padding: 6px 14px; border-radius: 6px; cursor: pointer; background: #f1f5f9; border: 1px solid #cbd5e1; color: #334155; font-weight: 500;">
+                    🔐 Staff Login
+                </button>
+                <div id="user-profile-badge" style="display: none; align-items: center; gap: 8px;">
+                    <span id="user-display-name" style="font-size: 13px; font-weight: 600; color: #1e293b; background: #e2e8f0; padding: 4px 10px; border-radius: 6px;"></span>
+                    <button type="button" id="btn-logout" class="btn-secondary" style="font-size: 12px; padding: 4px 10px; border-radius: 6px; cursor: pointer; background: #f8fafc; border: 1px solid #cbd5e1; color: #475569;">
+                        Log out
+                    </button>
+                </div>
+            </div>
+            <span class="status">Pilot Ready</span>
+        </div>
+    </header>
+
+    <main>
+
+        <!-- Dashboard introduction -->
+        <section class="intro">
+            <h2>Road Monitoring Dashboard</h2>
+
+            <p>
+                Explore the study area, locate road damage,
+                and prepare reports for repair prioritisation.
+            </p>
+
+            <p class="location">
+                <strong>Study area:</strong>
+                Thiruvananthapuram, Kerala, India
+            </p>
+        </section>
+
+        <!-- Interactive map with Multi-Layer View Switcher (Stage 5) -->
+        <section class="map-panel">
+            <div class="map-heading">
+                <div>
+                    <h3 style="margin: 0;">Interactive Road Map</h3>
+                    <span id="map-mode-indicator" style="font-size: 12.5px; color: #64748b; display: block; margin-top: 3px;">Layer: Individual Report Markers (Leaflet OSM)</span>
+                </div>
+                <!-- Map Layer Switcher -->
+                <div class="map-view-switcher" role="group" aria-label="Map view layers">
+                    <button type="button" id="btn-view-markers" class="btn-toggle active" title="View individual report markers">
+                        📍 Report Markers
+                    </button>
+                    <button type="button" id="btn-view-repaired" class="btn-toggle" title="View completed road repairs with verification photos">
+                        ✅ Repaired Roads
+                    </button>
+                    <button type="button" id="btn-view-hotspots" class="btn-toggle" title="View spatial density clusters using PostGIS DBSCAN">
+                        🔥 Hotspot Clusters
+                    </button>
+                    <button type="button" id="btn-view-traffic" class="btn-toggle" title="View real-time traffic conditions via Google TrafficLayer">
+                        🚦 Google Live Traffic
+                    </button>
+                </div>
+            </div>
+
+            <!-- Hotspot explanation / threshold notice banner -->
+            <div id="hotspot-banner" class="hotspot-notice-banner" style="display: none;"></div>
+
+            <!-- Primary Leaflet Map Container -->
+            <div id="map" aria-label="Interactive map of Thiruvananthapuram"></div>
+
+            <!-- Optional Google Live Traffic Map Container (Isolated view, Stage 5) -->
+            <div id="google-traffic-container" class="traffic-container" style="display: none;">
+                <div id="google-traffic-map" style="height: 520px; width: 100%; border-radius: 10px; display: none;"></div>
+                <div id="google-traffic-fallback" class="traffic-fallback-card">
+                    <div class="traffic-fallback-header">
+                        <span style="font-size: 28px;">🚦</span>
+                        <div>
+                            <h4>Google Live Traffic View (Visual Context Only)</h4>
+                            <p>Real-time road congestion context provided through Google Maps JavaScript API TrafficLayer.</p>
+                        </div>
+                    </div>
+                    <div class="traffic-fallback-body">
+                        <div class="field-hint" style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 10px; border-radius: 6px; color: #1e40af; margin-bottom: 12px;">
+                            <strong>Setup Requirement:</strong> To display live Google traffic in this optional view, set <code>GOOGLE_MAPS_API_KEY</code> in your <code>.env</code> file.
+                        </div>
+                        <ol>
+                            <li>Enable <strong>Maps JavaScript API</strong> in your Google Cloud Console.</li>
+                            <li>Create an API Key and apply <strong>Website/HTTP referrer restrictions</strong> (e.g. <code>http://127.0.0.1:5000/*</code>, <code>http://localhost:5000/*</code>).</li>
+                            <li>Ensure billing is enabled for your Google Cloud Project.</li>
+                            <li>Restart RoadWise AI. The traffic layer will automatically render here.</li>
+                        </ol>
+                        <p class="traffic-disclaimer">
+                            <em>Note: Google Traffic data is used solely as visual background context for maintenance teams. It is never scraped, cached, stored, or turned into numeric priority scores or PostGIS records. Google Maps &copy; 2026 Google.</em>
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <p id="map-message" role="status">
+                Loading map...
+            </p>
+        </section>
+
+        <!-- Manual & Geotagged road-damage report -->
+        <section class="report-panel">
+            <h2>Report Road Damage</h2>
+
+            <p>
+                Select an incident location by clicking the map, or upload a geotagged photo below to auto-populate the GPS coordinates. Review the marker on the map before submitting.
+            </p>
+
+            <form id="damage-form" method="POST" enctype="multipart/form-data">
+
+                <label for="road-name">
+                    Road name
+                    <span id="road-name-ai-badge" class="ai-inline-badge" style="display: none;"></span>
+                </label>
+                <input id="road-name" name="road_name" type="text" placeholder="e.g. MG Road, Palayam, Kowdiar Main Road" required>
+
+                <label for="damage-type">
+                    Damage type
+                    <span id="damage-type-ai-badge" class="ai-inline-badge" style="display: none;"></span>
+                </label>
+                <select id="damage-type" name="damage_type" required>
+                    <option value="">Select damage type</option>
+                    <option value="Pothole">Pothole</option>
+                    <option value="Longitudinal crack">Longitudinal crack</option>
+                    <option value="Transverse crack">Transverse crack</option>
+                    <option value="Alligator crack">Alligator crack</option>
+                    <option value="Surface deterioration">Surface deterioration</option>
+                </select>
+
+                <label for="severity">
+                    Severity
+                    <span id="severity-ai-badge" class="ai-inline-badge" style="display: none;"></span>
+                </label>
+                <select id="severity" name="severity" required>
+                    <option value="">Select severity</option>
+                    <option value="Critical">Critical</option>
+                    <option value="Moderate">Moderate</option>
+                    <option value="Minor">Minor</option>
+                </select>
+
+                <label for="description">Description</label>
+                <textarea id="description" name="description" placeholder="Describe the observed road damage, traffic hazard or lane blockage..." rows="3"></textarea>
+
+                <label for="damage-photo">Road photograph (JPEG, optional)</label>
+                <input id="damage-photo" name="photo" type="file" accept=".jpg,.jpeg,image/jpeg">
+                
+                <!-- Photo preview & AI Damage Detection Panel (Stage 4) -->
+                <div id="ai-detection-container" class="ai-detection-panel" style="display: none;">
+                    <div class="ai-detection-header">
+                        <span class="ai-detection-title">🤖 AI Road-Damage Detection</span>
+                        <span id="ai-detection-status" class="ai-status-badge ai-status-pending">Scanning image...</span>
+                    </div>
+
+                    <div id="ai-image-wrapper" class="ai-image-wrapper">
+                        <img id="damage-photo-preview" alt="Preview of attached road photograph" style="max-width: 100%; max-height: 260px; display: block; border-radius: 6px;">
+                        <canvas id="ai-bbox-canvas" style="position: absolute; top: 0; left: 0; pointer-events: none;"></canvas>
+                    </div>
+
+                    <div id="ai-detection-feedback" class="ai-detection-feedback" style="margin-top: 8px;">
+                        <div id="ai-feedback-text">Scanning for road damage...</div>
+                    </div>
+
+                    <p class="field-hint" style="margin-top: 6px; font-size: 12px; color: #475569;">
+                        <em>The AI model automatically predicts and sets both <strong>Damage type</strong> and <strong>Severity</strong> in the form above based on confidence and damage density. You can adjust them if needed before submitting.</em>
+                    </p>
+                </div>
+
+                <!-- AI Map & Spatial Analytics Panel -->
+                <div id="ai-map-analysis-container" class="map-analysis-panel" style="display: none;">
+                    <div class="map-analysis-header">
+                        <span class="map-analysis-title">🗺️ AI Map &amp; Spatial Analysis</span>
+                        <span id="map-analysis-tier-badge" class="priority-tier-badge priority-high">High Priority</span>
+                    </div>
+                    <div id="map-analysis-content" class="map-analysis-body">
+                        <!-- Dynamic spatial intelligence injected via map.js -->
+                    </div>
+                </div>
+
+                <p id="damage-photo-hint" class="field-hint">
+                    Select a JPEG photograph to attach to this report. If it contains GPS coordinates, you can extract them below to automatically set the location.
+                </p>
+
+                <button type="button" id="auto-fill-gps-btn" class="btn-secondary" style="display: none;">
+                    📍 Auto-populate report location from this photo's GPS
+                </button>
+
+                <!-- Hidden inputs ensuring coordinates are submitted explicitly -->
+                <input type="hidden" id="report-lat" name="latitude">
+                <input type="hidden" id="report-lng" name="longitude">
+
+                <!-- Selected location display for user review before submission -->
+                <div id="selected-location-box" class="location-box">
+                    <strong>Selected Incident Location:</strong>
+                    <p id="selected-location">No location selected yet. Click the map or extract GPS from a photo.</p>
+                    <button type="button" id="btn-analyze-map-location" class="btn-secondary" style="font-size: 12px; margin-top: 6px; display: none;">
+                        🗺️ Analyze Location on Map
+                    </button>
+                </div>
+
+                <button type="submit" id="submit-report-btn">
+                    Submit Road-Damage Report
+                </button>
+
+                <p id="report-message" role="status"></p>
+
+            </form>
+        </section>
+
+        <!-- Geotagged road-photo upload & GPS extraction tool -->
+        <section class="report-panel">
+            <h2>Geotagged Road Photo GPS Tool</h2>
+
+            <p>
+                Upload an original JPEG photograph containing GPS EXIF metadata. The coordinates will be verified, marked on the map, and automatically linked to the damage report above.
+            </p>
+
+            <form id="photo-form" method="POST" enctype="multipart/form-data">
+
+                <label for="road-photo">
+                    Road damage photograph (JPEG)
+                </label>
+
+                <input id="road-photo" name="photo" type="file" accept=".jpg,.jpeg,image/jpeg" required>
+
+                <img id="photo-preview" alt="Preview of the uploaded road photograph" hidden style="
+                    max-width: 100%;
+                    max-height: 280px;
+                    margin-top: 12px;
+                    border-radius: 8px;
+                ">
+
+                <p class="field-hint">
+                    GPS coordinates are read directly from the camera's EXIF tags. Note that images sent via standard WhatsApp or social media have EXIF data stripped.
+                </p>
+
+                <button type="submit" id="extract-photo-btn">
+                    Extract GPS and Locate Road
+                </button>
+
+                <p id="photo-message" role="status"></p>
+
+            </form>
+        </section>
+
+        <!-- GIS Analytics & Maintenance Prioritisation Dashboard (Stage 5) -->
+        <section class="report-panel" id="analytics-filter-panel">
+            <div class="map-heading">
+                <div>
+                    <h2>GIS Analytics &amp; Maintenance Prioritisation</h2>
+                    <span style="font-size: 13px; color: #64748b;">Multi-criteria spatial decision support (Severity + Road Class + Traffic + Junctions + Age)</span>
+                </div>
+                <button type="button" id="recompute-priority-btn" class="btn-secondary" style="font-size: 13px; padding: 6px 14px;">
+                    ⚡ Recalculate Priorities
+                </button>
+            </div>
+
+            <p>
+                Filter damage reports by date range, damage type, and severity. Summary counts, map markers, and report feeds update dynamically. Priority scores are computed transparently in PostGIS to assist maintenance crews in scheduling urgent repairs.
+            </p>
+
+            <!-- Combined Filter Form -->
+            <div class="filter-bar">
+                <div class="filter-field">
+                    <label for="filter-date-from">Start Date</label>
+                    <input type="date" id="filter-date-from">
+                </div>
+                <div class="filter-field">
+                    <label for="filter-date-to">End Date</label>
+                    <input type="date" id="filter-date-to">
+                </div>
+                <div class="filter-field">
+                    <label for="filter-damage-type">Damage Type</label>
+                    <select id="filter-damage-type">
+                        <option value="">All Damage Types</option>
+                        <option value="Pothole">Pothole</option>
+                        <option value="Longitudinal crack">Longitudinal crack</option>
+                        <option value="Transverse crack">Transverse crack</option>
+                        <option value="Alligator crack">Alligator crack</option>
+                        <option value="Surface deterioration">Surface deterioration</option>
+                    </select>
+                </div>
+                <div class="filter-field">
+                    <label for="filter-severity">Severity</label>
+                    <select id="filter-severity">
+                        <option value="">All Severities</option>
+                        <option value="Critical">Critical</option>
+                        <option value="Moderate">Moderate</option>
+                        <option value="Minor">Minor</option>
+                    </select>
+                </div>
+                <div class="filter-actions">
+                    <button type="button" id="apply-filters-btn" class="btn-primary-action">Apply Filters</button>
+                    <button type="button" id="reset-filters-btn" class="btn-reset">Clear / Reset</button>
+                </div>
+            </div>
+
+            <!-- Dynamic Summary Counts (Filtered KPIs) -->
+            <div class="summary-grid">
+                <div class="summary-card">
+                    <div class="summary-title">Total Reports</div>
+                    <div class="summary-value" id="kpi-total-reports">0</div>
+                    <div class="summary-sub" id="kpi-filter-status">All reports</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-title">By Severity</div>
+                    <div class="summary-pills" id="kpi-severity-pills">
+                        <span class="pill pill-crit" id="kpi-sev-crit">Critical: 0</span>
+                        <span class="pill pill-mod" id="kpi-sev-mod">Moderate: 0</span>
+                        <span class="pill pill-min" id="kpi-sev-min">Minor: 0</span>
+                    </div>
+                    <div class="summary-sub">Confirmed by user</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-title">By Priority Tier</div>
+                    <div class="summary-pills" id="kpi-priority-pills">
+                        <span class="pill pill-prio-high" id="kpi-prio-high">High: 0</span>
+                        <span class="pill pill-prio-med" id="kpi-prio-med">Medium: 0</span>
+                        <span class="pill pill-prio-low" id="kpi-prio-low">Low: 0</span>
+                    </div>
+                    <div class="summary-sub">Decision support tier</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-title">By Damage Type</div>
+                    <div class="summary-types-list" id="kpi-damage-types">
+                        <span>Loading counts...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- External GIS Layer Provenance Banner -->
+            <div class="ext-data-banner" id="ext-data-banner">
+                <span class="ext-data-title">GIS Layers (SRID 32643 UTM 43N):</span>
+                <span id="ext-data-roads" class="badge">Roads: checking...</span>
+                <span id="ext-data-junctions" class="badge">Junctions: checking...</span>
+                <span id="ext-data-traffic" class="badge">Traffic (AADT): checking...</span>
+            </div>
+        </section>
+
+        <!-- Stage 6A: Maintenance Work-Order Export Panel -->
+        <section class="report-panel" id="export-panel">
+            <div class="map-heading">
+                <div>
+                    <h2>Export Maintenance Work Orders</h2>
+                    <span style="font-size: 13px; color: #64748b;">Download filtered or selected reports as PDF, CSV, or GeoJSON</span>
+                </div>
+                <span id="export-selection-badge" class="badge badge-manual" style="display:none;">0 selected</span>
+            </div>
+
+            <p style="font-size: 13.5px; color: #475569; margin-bottom: 10px;">
+                Export applies the <strong>currently active filters</strong> (date, damage type, severity) from the analytics panel above,
+                or exports only the <strong>reports you have checked</strong> in the report feed below.
+                Each export includes: report ID, road name, damage type, confirmed severity, coordinates,
+                priority tier &amp; score, factor breakdown, matched road segment, data source details, and photo reference.
+                <br><em style="font-size: 12px; color: #94a3b8;">AI-predicted values are never labelled as confirmed. Priority scores are decision support only, not an official engineering assessment.</em>
+            </p>
+
+            <div class="export-btn-row" id="export-btn-row">
+                <!-- Export filtered results -->
+                <div class="export-group">
+                    <span class="export-group-label">Export filtered results:</span>
+                    <button type="button" class="btn-export btn-export-pdf" id="btn-export-pdf-filtered"
+                            title="Download current filter results as a printable PDF work-order">
+                        📄 PDF Work Order
+                    </button>
+                    <button type="button" class="btn-export btn-export-csv" id="btn-export-csv-filtered"
+                            title="Download current filter results as CSV spreadsheet">
+                        📊 CSV Spreadsheet
+                    </button>
+                    <button type="button" class="btn-export btn-export-geo" id="btn-export-geojson-filtered"
+                            title="Download current filter results as GeoJSON for GIS import">
+                        🌐 GeoJSON
+                    </button>
+                </div>
+                <!-- Export selected reports (shown only when rows are checked) -->
+                <div class="export-group" id="export-selected-group" style="display:none;">
+                    <span class="export-group-label">Selected reports:</span>
+                    <button type="button" class="btn-export btn-export-pdf" id="btn-export-pdf-selected"
+                            title="Download selected reports as PDF">
+                        📄 PDF
+                    </button>
+                    <button type="button" class="btn-export btn-export-csv" id="btn-export-csv-selected"
+                            title="Download selected reports as CSV">
+                        📊 CSV
+                    </button>
+                    <button type="button" class="btn-export btn-export-geo" id="btn-export-geojson-selected"
+                            title="Download selected reports as GeoJSON">
+                        🌐 GeoJSON
+                    </button>
+                    <button type="button" class="btn-export btn-export-wo" id="btn-create-wo-selected"
+                            title="Explicitly create maintenance work orders for the checked reports"
+                            style="background:#0f766e; color:#ffffff;">
+                        ⚡ Create Work Order(s)
+                    </button>
+                </div>
+            </div>
+
+            <p id="export-message" role="status" style="font-size: 13px; margin-top: 8px;"></p>
+        </section>
+
+        <!-- Submitted Reports Feed / Log -->
+        <section class="report-panel" id="reports-log-panel">
+            <div class="map-heading">
+                <h2>Submitted Road-Damage Reports</h2>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="reports-count-badge" class="badge badge-manual">0 reports</span>
+                    <label style="font-size:12px; color:#64748b; display:flex; align-items:center; gap:4px; cursor:pointer;">
+                        <input type="checkbox" id="select-all-reports" style="accent-color:#0284c7;"> Select all
+                    </label>
+                </div>
+            </div>
+
+            <p>
+                Browse saved road-damage reports. Reports remain available after the app restarts. Click <strong>"📍 View on Map"</strong> on any card to pan and zoom to that report.
+            </p>
+
+            <div id="reports-list" class="reports-grid">
+                <p id="no-reports-msg" style="color: #64748b; font-style: italic; padding: 12px 0;">
+                    No reports saved yet. Submit a report above to see it appear here and on the map.
+                </p>
+            </div>
+        </section>
+
+        <!-- Stage 6B: Maintenance Work-Order Queue -->
+        <section class="report-panel" id="work-orders-queue-panel">
+            <div class="map-heading">
+                <div>
+                    <h2>Maintenance Work-Order Queue</h2>
+                    <span style="font-size: 13px; color: #64748b;">Operational repair tracking from dispatch to verification</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="wo-count-badge" class="badge badge-manual">0 work orders</span>
+                    <button type="button" id="refresh-wo-btn" class="btn-secondary" style="font-size:12px; padding:4px 10px;">🔄 Refresh Queue</button>
+                </div>
+            </div>
+
+            <!-- Queue KPI Summary Cards -->
+            <div class="summary-grid" style="margin-bottom: 16px;">
+                <div class="summary-card">
+                    <div class="summary-title">Total Work Orders</div>
+                    <div class="summary-value" id="kpi-wo-total">0</div>
+                    <div class="summary-sub" id="kpi-wo-filter-status">All tracked orders</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-title">Active Field Work</div>
+                    <div class="summary-pills">
+                        <span class="pill pill-crit" id="kpi-wo-inprogress">In Progress: 0</span>
+                        <span class="pill pill-mod" id="kpi-wo-assigned">Assigned: 0</span>
+                        <span class="pill pill-min" id="kpi-wo-open">Open: 0</span>
+                    </div>
+                    <div class="summary-sub">Pending repair completion</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-title">Resolved &amp; Deferred</div>
+                    <div class="summary-pills">
+                        <span class="pill pill-prio-low" id="kpi-wo-completed">Completed: 0</span>
+                        <span class="pill pill-prio-med" id="kpi-wo-deferred">Deferred: 0</span>
+                    </div>
+                    <div class="summary-sub">Closed or postponed</div>
+                </div>
+            </div>
+
+            <!-- Work Order Queue Filters -->
+            <div class="filter-bar" style="margin-bottom: 16px;">
+                <div class="filter-field">
+                    <label for="filter-wo-status">Status</label>
+                    <select id="filter-wo-status">
+                        <option value="">All Statuses</option>
+                        <option value="Open">Open</option>
+                        <option value="Assigned">Assigned</option>
+                        <option value="In Progress">In Progress</option>
+                        <option value="Completed">Completed</option>
+                        <option value="Deferred">Deferred</option>
+                    </select>
+                </div>
+                <div class="filter-field">
+                    <label for="filter-wo-priority">Priority Tier</label>
+                    <select id="filter-wo-priority">
+                        <option value="">All Priorities</option>
+                        <option value="High">High</option>
+                        <option value="Medium">Medium</option>
+                        <option value="Low">Low</option>
+                    </select>
+                </div>
+                <div class="filter-field">
+                    <label for="filter-wo-search">Search</label>
+                    <input type="text" id="filter-wo-search" placeholder="WO Code, road name, or assignee">
+                </div>
+                <div class="filter-actions">
+                    <button type="button" id="apply-wo-filters-btn" class="btn-primary-action">Apply Filters</button>
+                    <button type="button" id="reset-wo-filters-btn" class="btn-reset">Reset</button>
+                </div>
+            </div>
+
+            <p id="wo-queue-message" role="status" style="font-size: 13px; margin-bottom: 10px;"></p>
+
+            <!-- Work Orders List / Grid -->
+            <div id="work-orders-list" class="reports-grid">
+                <p id="no-wo-msg" style="color: #64748b; font-style: italic; padding: 12px 0;">
+                    No work orders created yet. Select road-damage reports above and click "Create Work Order(s)" to track maintenance.
+                </p>
+            </div>
+        </section>
+
+        <!-- Stage 8: Public Road-Repair Progress Updates Section -->
+        <section class="report-panel" id="public-progress-panel">
+            <div class="map-heading">
+                <div>
+                    <h2>Road Repair Progress</h2>
+                    <span style="font-size: 13px; color: #64748b;">Public progress updates and verified repair milestones across Thiruvananthapuram</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="public-progress-count-badge" class="badge badge-manual">0 updates</span>
+                    <button type="button" id="refresh-public-progress-btn" class="btn-secondary" style="font-size:12px; padding:4px 10px;">🔄 Refresh Feed</button>
+                </div>
+            </div>
+
+            <p style="font-size: 13.5px; color: #475569; margin-bottom: 12px;">
+                Track active and completed repairs published by municipal public works teams. All published updates include verified progress milestones, completion notes, and approved photographic or document records.
+            </p>
+
+            <!-- Officer Action Layer: Add Repair Details & Maintenance-Completed Photos (Officers Only) -->
+            <div id="officer-progress-action-layer" class="officer-layer-container">
+                <!-- Logged-out state notice -->
+                <div id="officer-layer-logged-out" class="officer-layer-callout">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 24px;">👷</span>
+                        <div>
+                            <strong style="color: #0f172a; font-size: 13.5px;">Municipal Officer Access</strong>
+                            <p style="margin: 2px 0 0; font-size: 12px; color: #64748b;">
+                                Are you an authorized municipal officer? Log in to record repair progress and upload maintenance-completed photographs directly.
+                            </p>
+                        </div>
+                    </div>
+                    <button type="button" id="btn-officer-layer-login" class="btn-secondary" style="font-size: 12px; padding: 6px 14px; font-weight: 600;">
+                        🔐 Officer Login
+                    </button>
+                </div>
+
+                <!-- Logged-in state (Officers only) -->
+                <div id="officer-layer-logged-in" class="officer-layer-card" style="display: none;">
+                    <div class="officer-layer-header">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 20px;">🛠️</span>
+                            <div>
+                                <h3 style="margin: 0; font-size: 14.5px; color: #0f766e;">Officer Layer: Record Repair Progress &amp; Upload Completed Photos</h3>
+                                <span style="font-size: 11.5px; color: #64748b;">Signed in as <strong id="officer-layer-username">Officer</strong> &bull; Only authorized staff can post updates here</span>
+                            </div>
+                        </div>
+                        <button type="button" id="btn-toggle-officer-form" class="btn-primary-action" style="font-size: 12px; padding: 5px 12px; background: #0f766e;">
+                            + Post Progress / Completion
+                        </button>
+                    </div>
+
+                    <!-- Direct Officer Update Form -->
+                    <form id="form-officer-direct-update" enctype="multipart/form-data" style="display: none; margin-top: 14px; padding-top: 12px; border-top: 1px dashed #cbd5e1;">
+                        <div class="filter-bar" style="margin-bottom: 10px; grid-template-columns: 2fr 1fr 1fr;">
+                            <div class="filter-field">
+                                <label for="officer-direct-wo-select"><strong>Select Work Order</strong> <span style="color: #dc2626;">*</span></label>
+                                <select id="officer-direct-wo-select" required>
+                                    <option value="">-- Choose active work order --</option>
+                                </select>
+                            </div>
+                            <div class="filter-field">
+                                <label for="officer-direct-status"><strong>Update Status</strong></label>
+                                <select id="officer-direct-status">
+                                    <option value="Completed" selected>Completed (Maintenance Done)</option>
+                                    <option value="In Progress">In Progress</option>
+                                    <option value="Assigned">Assigned</option>
+                                    <option value="Open">Open</option>
+                                    <option value="Deferred">Deferred</option>
+                                </select>
+                            </div>
+                            <div class="filter-field">
+                                <label for="officer-direct-progress-pct"><strong>Progress %</strong></label>
+                                <input type="number" id="officer-direct-progress-pct" min="0" max="100" step="5" value="100">
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: 10px;">
+                            <label for="officer-direct-work-completed" style="display: block; font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 4px;">
+                                Work Completed / Maintenance Description <span style="color: #dc2626;">*</span>
+                            </label>
+                            <textarea id="officer-direct-work-completed" rows="2" required placeholder="Describe maintenance work executed (e.g., pothole cleaned, hot bitumen tack coat applied, compacted flush with road level). Required to mark Completed." style="width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 10px; font-size: 12.5px; font-family: inherit;"></textarea>
+                        </div>
+
+                        <div class="filter-bar" style="margin-bottom: 10px; grid-template-columns: 1.5fr 1fr 1fr;">
+                            <div class="filter-field">
+                                <label for="officer-direct-photo"><strong>📷 Maintenance-Completed Photograph (or PDF)</strong></label>
+                                <input type="file" id="officer-direct-photo" accept=".jpg,.jpeg,.png,.pdf" style="font-size: 11.5px;">
+                            </div>
+                            <div class="filter-field">
+                                <label for="officer-direct-caption">Photo Caption</label>
+                                <input type="text" id="officer-direct-caption" placeholder="e.g. Completed asphalt patching" value="Maintenance completed photograph">
+                            </div>
+                            <div class="filter-field">
+                                <label for="officer-direct-est-date">Completion / Target Date</label>
+                                <input type="date" id="officer-direct-est-date">
+                            </div>
+                        </div>
+
+                        <div class="filter-bar" style="margin-bottom: 10px; grid-template-columns: 1fr 1fr;">
+                            <div class="filter-field">
+                                <label for="officer-direct-blockers">Blockers / Site Notes (optional)</label>
+                                <input type="text" id="officer-direct-blockers" placeholder="e.g. Speed restrictions until final roll">
+                            </div>
+                            <div class="filter-field">
+                                <label for="officer-direct-internal-notes">Internal Crew Notes (Private &bull; Staff only)</label>
+                                <input type="text" id="officer-direct-internal-notes" placeholder="e.g. Batch #42 asphalt, crew foreman contact...">
+                            </div>
+                        </div>
+
+                        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px dashed #cbd5e1;">
+                            <label style="font-size: 12.5px; color: #0f766e; font-weight: 600; display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                <input type="checkbox" id="officer-direct-is-published" checked style="accent-color: #0f766e;">
+                                🌐 Publish to Public "Road Repair Progress" feed immediately
+                            </label>
+                            <div style="display: flex; gap: 8px;">
+                                <button type="button" id="btn-cancel-officer-direct" class="btn-reset">Cancel</button>
+                                <button type="submit" id="btn-submit-officer-direct" class="btn-primary-action" style="background: #0f766e;">
+                                    🚀 Post &amp; Publish Completed Repair
+                                </button>
+                            </div>
+                        </div>
+                        <p id="officer-direct-msg" role="status" style="font-size: 12.5px; margin: 8px 0 0;"></p>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Public Progress Search & Filters -->
+            <div class="filter-bar" style="margin-bottom: 16px;">
+                <div class="filter-field">
+                    <label for="filter-public-status">Repair Status</label>
+                    <select id="filter-public-status">
+                        <option value="">All Statuses</option>
+                        <option value="In Progress">In Progress</option>
+                        <option value="Completed">Completed</option>
+                        <option value="Assigned">Assigned</option>
+                        <option value="Open">Open</option>
+                        <option value="Deferred">Deferred</option>
+                    </select>
+                </div>
+                <div class="filter-field">
+                    <label for="filter-public-search">Search Road or Code</label>
+                    <input type="text" id="filter-public-search" placeholder="e.g. MG Road, WO-0001">
+                </div>
+                <div class="filter-actions">
+                    <button type="button" id="apply-public-filters-btn" class="btn-primary-action">Filter</button>
+                    <button type="button" id="reset-public-filters-btn" class="btn-reset">Reset</button>
+                </div>
+            </div>
+
+            <!-- Public Updates Feed / Grid -->
+            <div id="public-progress-list" class="reports-grid">
+                <p id="no-public-progress-msg" style="color: #64748b; font-style: italic; padding: 12px 0;">
+                    No published repair updates available at this time.
+                </p>
+            </div>
+
+            <!-- Pagination Controls -->
+            <div id="public-progress-pagination" style="display:flex; justify-content:space-between; align-items:center; margin-top:14px; padding-top:10px; border-top:1px solid #e2e8f0;">
+                <button type="button" id="btn-public-prev" class="btn-secondary" style="font-size:12px; padding:4px 12px;" disabled>&larr; Previous</button>
+                <span id="public-page-indicator" style="font-size:12.5px; color:#64748b;">Page 1</span>
+                <button type="button" id="btn-public-next" class="btn-secondary" style="font-size:12px; padding:4px 12px;" disabled>Next &rarr;</button>
+            </div>
+        </section>
+
+        <!-- Project information & PostGIS Architecture -->
+        <section class="info-panel">
+            <h3>About RoadWise AI</h3>
+
+            <p>
+                RoadWise AI is a Web GIS prototype for mapping road
+                damage and supporting maintenance prioritisation in Thiruvananthapuram, Kerala.
+            </p>
+
+            <p>
+                <strong>Current development stages:</strong>
+                interactive Leaflet mapping, manual map reporting, geotagged photo GPS extraction,
+                integrated damage reporting workflow, and persistent PostgreSQL/PostGIS report storage.
+            </p>
+
+            <div class="storage-notice">
+                <h4>Database Architecture &amp; PostGIS Integration</h4>
+                <p>
+                    <strong>Current status:</strong> Report details and locations are stored in PostgreSQL/PostGIS. Uploaded photographs are stored in the app's <code>static/uploads</code> folder.
+                </p>
+                <p>
+                    <strong>PostGIS Schema:</strong> Each submitted report is stored as a spatial <code>Point</code> in SRID 4326. The app creates the report table and spatial index when it starts:
+                </p>
+                <code>geom GEOMETRY(Point, 4326) NOT NULL</code> · A GiST spatial index is created for location searches.
+            </div>
+
+            <p style="margin-top: 14px; font-size: 13px; color: #64748b;">
+                Demonstration incidents (A, B, C) are illustrative and not field-verified.
+            </p>
+        </section>
+
+        <!-- Stage 6B: Work Order Update & Audit History Modal -->
+        <div id="wo-modal" class="wo-modal-backdrop" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="modal-wo-title">
+            <div class="wo-modal-dialog">
+                <div class="wo-modal-header">
+                    <div>
+                        <h3 id="modal-wo-title" style="margin:0; font-size:18px;">Update Work Order</h3>
+                        <span id="modal-wo-subtitle" style="font-size:12.5px; color:#64748b;"></span>
+                    </div>
+                    <button type="button" class="wo-modal-close" id="btn-close-wo-modal" aria-label="Close dialog">&times;</button>
+                </div>
+                <div class="wo-modal-body">
+                    <!-- Linked report summary card -->
+                    <div id="modal-linked-report-card" class="wo-modal-report-summary"></div>
+
+                    <!-- Work order edit form -->
+                    <form id="wo-edit-form">
+                        <input type="hidden" id="edit-wo-id">
+
+                        <div class="filter-bar" style="margin-bottom:12px; grid-template-columns: 1fr 1fr;">
+                            <div class="filter-field">
+                                <label for="edit-wo-status"><strong>Update Status</strong></label>
+                                <select id="edit-wo-status" style="font-weight:600;">
+                                    <option value="Open">Open</option>
+                                    <option value="Assigned">Assigned</option>
+                                    <option value="In Progress">In Progress</option>
+                                    <option value="Completed">Completed</option>
+                                    <option value="Deferred">Deferred</option>
+                                </select>
+                                <small id="status-transition-hint" style="font-size:11px; color:#64748b; margin-top:2px; display:block;"></small>
+                            </div>
+                            <div class="filter-field">
+                                <label for="edit-wo-assigned">Assigned Person / Team</label>
+                                <input type="text" id="edit-wo-assigned" placeholder="e.g. South Maintenance Crew A">
+                            </div>
+                        </div>
+
+                        <div class="filter-bar" style="margin-bottom:12px; grid-template-columns: 1fr 2fr;">
+                            <div class="filter-field">
+                                <label for="edit-wo-target-date">Target Date</label>
+                                <input type="date" id="edit-wo-target-date">
+                            </div>
+                            <div class="filter-field">
+                                <label for="edit-wo-status-note">Status Transition Note</label>
+                                <input type="text" id="edit-wo-status-note" placeholder="Explain reason for status change...">
+                            </div>
+                        </div>
+
+                        <div class="filter-field" style="margin-bottom:12px;">
+                            <label for="edit-wo-notes">Maintenance Notes</label>
+                            <textarea id="edit-wo-notes" rows="2" placeholder="Material requirements, traffic diversions, contractor notes..." style="width:100%; border:1px solid #cbd5e1; border-radius:6px; padding:6px; font-family:inherit;"></textarea>
+                        </div>
+
+                        <div style="display:flex; justify-content:flex-end; gap:8px; margin-bottom:14px;">
+                            <button type="button" class="btn-reset" id="btn-cancel-wo-modal">Cancel</button>
+                            <button type="submit" class="btn-primary-action" id="btn-save-wo-modal">💾 Save Changes</button>
+                        </div>
+                    </form>
+
+                    <p id="modal-wo-message" role="status" style="font-size:12.5px; margin:0 0 10px 0;"></p>
+
+                    <!-- Stage 8: Post Progress Update Form (Authenticated Officers & Supervisors) -->
+                    <div id="wo-progress-update-section" class="wo-update-panel">
+                        <div class="wo-update-panel-header">
+                            <div>
+                                <h4 style="margin: 0; font-size: 14px; color: #0f172a;">🛠️ Post Field Progress Update</h4>
+                                <span style="font-size: 11.5px; color: #64748b;">Record repair progress, completion summaries, or upload after-work photos / PDFs</span>
+                            </div>
+                        </div>
+
+                        <form id="form-post-progress-update" enctype="multipart/form-data" style="margin-top: 10px;">
+                            <div style="margin-bottom: 8px;">
+                                <label for="update-work-completed" style="display: block; font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 2px;">
+                                    Work Completed &bull; Repair Milestone <span style="color: #dc2626;">*</span>
+                                </label>
+                                <textarea id="update-work-completed" rows="2" required placeholder="Describe repair actions taken (e.g. cold mix applied, compacted, drainage cleared). Required when marking Completed." style="width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 8px; font-size: 12.5px; font-family: inherit;"></textarea>
+                            </div>
+
+                            <div class="filter-bar" style="margin-bottom: 8px; grid-template-columns: 1fr 1fr 1fr;">
+                                <div class="filter-field">
+                                    <label for="update-progress-pct" style="font-size: 11.5px;">Progress % (0-100)</label>
+                                    <input type="number" id="update-progress-pct" min="0" max="100" step="5" value="0">
+                                </div>
+                                <div class="filter-field">
+                                    <label for="update-status" style="font-size: 11.5px;">Update Status</label>
+                                    <select id="update-status">
+                                        <option value="">Keep current status</option>
+                                        <option value="Open">Open</option>
+                                        <option value="Assigned">Assigned</option>
+                                        <option value="In Progress">In Progress</option>
+                                        <option value="Completed">Completed</option>
+                                        <option value="Deferred">Deferred</option>
+                                    </select>
+                                </div>
+                                <div class="filter-field">
+                                    <label for="update-est-completion" style="font-size: 11.5px;">Est. Completion Date</label>
+                                    <input type="date" id="update-est-completion">
+                                </div>
+                            </div>
+
+                            <div class="filter-bar" style="margin-bottom: 8px; grid-template-columns: 1fr 1fr;">
+                                <div class="filter-field">
+                                    <label for="update-blockers" style="font-size: 11.5px;">Blockers / Issues (optional)</label>
+                                    <input type="text" id="update-blockers" placeholder="e.g. Heavy rain, asphalt delay">
+                                </div>
+                                <div class="filter-field">
+                                    <label for="update-next-actions" style="font-size: 11.5px;">Next Planned Actions (optional)</label>
+                                    <input type="text" id="update-next-actions" placeholder="e.g. Roller compaction tomorrow">
+                                </div>
+                            </div>
+
+                            <div style="margin-bottom: 8px;">
+                                <label for="update-internal-notes" style="display: block; font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 2px;">
+                                    Internal Staff Notes <span style="font-size: 11px; font-weight: normal; color: #94a3b8;">(Private &bull; Never exposed to the public)</span>
+                                </label>
+                                <textarea id="update-internal-notes" rows="1" placeholder="Private crew notes, supplier references, or contractor details..." style="width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 6px; padding: 5px 8px; font-size: 12px; font-family: inherit;"></textarea>
+                            </div>
+
+                            <div class="filter-bar" style="margin-bottom: 8px; grid-template-columns: 1.5fr 1fr;">
+                                <div class="filter-field">
+                                    <label for="update-attachment" style="font-size: 11.5px;">Attach Progress Photo / PDF (max 10MB)</label>
+                                    <input type="file" id="update-attachment" accept=".jpg,.jpeg,.png,.pdf" style="font-size: 11.5px;">
+                                </div>
+                                <div class="filter-field">
+                                    <label for="update-caption" style="font-size: 11.5px;">Attachment Caption</label>
+                                    <input type="text" id="update-caption" placeholder="e.g. Post-patching surface">
+                                </div>
+                            </div>
+
+                            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; padding-top: 8px; border-top: 1px dashed #e2e8f0;">
+                                <div style="display: flex; align-items: center; gap: 14px;">
+                                    <label style="font-size: 12px; color: #0f766e; font-weight: 600; display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                                        <input type="checkbox" id="update-is-published" checked style="accent-color: #0f766e;">
+                                        🌐 Publish to Public Feed
+                                    </label>
+                                    <label style="font-size: 12px; color: #64748b; display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                                        <input type="checkbox" id="update-is-correction" style="accent-color: #0284c7;">
+                                        Correction of earlier update
+                                    </label>
+                                    <select id="update-correction-for-id" style="display: none; font-size: 11.5px; padding: 2px 6px;">
+                                        <option value="">Select previous update...</option>
+                                    </select>
+                                </div>
+                                <button type="submit" id="btn-submit-progress-update" class="btn-primary-action" style="font-size: 12px; padding: 6px 14px; background: #0f766e;">
+                                    🚀 Post Update
+                                </button>
+                            </div>
+                            <p id="modal-update-form-message" role="status" style="font-size: 12px; margin: 6px 0 0;"></p>
+                        </form>
+                    </div>
+
+                    <!-- Progress Updates & Milestones Timeline -->
+                    <div class="wo-updates-section" style="margin-top: 12px; border-top: 1px solid #e2e8f0; padding-top: 12px;">
+                        <h4 style="margin: 0 0 8px 0; font-size: 14px; color: #1e293b;">📋 Progress Updates &amp; Public Milestones</h4>
+                        <div id="modal-wo-updates-list" class="wo-updates-timeline">
+                            <span style="color: #94a3b8; font-style: italic; font-size: 12px;">Loading progress updates...</span>
+                        </div>
+                    </div>
+
+                    <!-- Status History Timeline -->
+                    <div class="wo-history-section">
+                        <h4 style="margin:0 0 8px 0; font-size:14px; color:#1e293b;">📜 Status Audit History</h4>
+                        <div id="modal-wo-history-list" class="wo-history-timeline"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stage 7: Pilot Staff Login Modal -->
+        <div id="login-modal" class="modal-backdrop" style="display: none;">
+            <div class="modal-dialog" style="max-width: 400px;">
+                <div class="modal-header">
+                    <div>
+                        <h3 style="margin: 0; font-size: 17px; color: #0f172a;">🔐 Municipal Staff Login</h3>
+                        <p style="margin: 4px 0 0; font-size: 12px; color: #64748b;">
+                            Authorized access for work orders and priority management.
+                        </p>
+                    </div>
+                    <button type="button" id="btn-close-login-modal" class="modal-close" aria-label="Close">&times;</button>
+                </div>
+                <form id="form-login" style="padding: 18px 20px;">
+                    <div id="login-error-alert" style="display: none; padding: 8px 12px; margin-bottom: 12px; background: #fee2e2; border: 1px solid #f87171; color: #991b1b; border-radius: 6px; font-size: 12.5px;"></div>
+                    <div style="margin-bottom: 12px;">
+                        <label for="login-username" style="display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 4px; color: #334155;">Username</label>
+                        <input type="text" id="login-username" required autocomplete="username" placeholder="e.g. officer1" style="width: 100%; box-sizing: border-box; padding: 7px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-family: inherit;">
+                    </div>
+                    <div style="margin-bottom: 16px;">
+                        <label for="login-password" style="display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 4px; color: #334155;">Password</label>
+                        <input type="password" id="login-password" required autocomplete="current-password" placeholder="••••••••" style="width: 100%; box-sizing: border-box; padding: 7px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-family: inherit;">
+                    </div>
+                    <div style="display: flex; justify-content: flex-end; gap: 8px;">
+                        <button type="button" id="btn-cancel-login" class="btn-reset" style="padding: 6px 14px; cursor: pointer;">Cancel</button>
+                        <button type="submit" id="btn-submit-login" class="btn-primary-action" style="padding: 6px 16px; cursor: pointer;">Log In</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Leaflet JavaScript -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- RoadWise AI map and reporting functionality -->
+    <script src="{{ url_for('static', filename='js/map.js') }}"></script>
+
+</body>
+
+</html>

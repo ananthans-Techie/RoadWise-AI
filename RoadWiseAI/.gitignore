@@ -1,0 +1,28 @@
+# Environment & Secrets (Never commit credentials)
+.env
+.env.*
+!.env.example
+
+# Python cache & compiled bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Virtual Environment
+.venv/
+env/
+venv/
+ENV/
+
+# Local uploaded photographs (stored locally on this machine)
+static/uploads/*.jpg
+!static/uploads/.gitkeep
+
+# AI Models, Datasets & Training Runs (Stage 4)
+datasets/
+models/
+runs/
+*.pt
+*.onnx
