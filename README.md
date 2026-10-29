@@ -1,8 +1,8 @@
-# RoadWise AI: Road Damage GIS (Stage 4: AI-Assisted Road-Damage Detection)
+# RoadWise AI: Road Damage GIS (Stage 8: Public Road-Repair Progress Updates)
 
 RoadWise AI is a Web GIS platform designed for logging, mapping, and prioritising road damage and maintenance incidents across the study area of **Thiruvananthapuram, Kerala, India**.
 
-Stage 4 integrates local deep learning object detection (Ultralytics YOLOv8n trained on RDD2022 India data) to automatically detect road damage zones in uploaded photos and suggest damage categories for user review, backed by PostgreSQL 18 + PostGIS.
+Stage 8 introduces **Public Road-Repair Progress Updates**, bringing municipal repair transparency to citizens through an authenticated officer update workflow, an append-only repair milestone timeline with validated photo/PDF attachments, and an open, privacy-preserving public progress feed on the main dashboard alongside a verified repaired roads map layer.
 
 ---
 
@@ -20,21 +20,20 @@ copy .env.example .env
 # 3. Install dependencies in virtual environment
 ..\.venv\Scripts\python.exe -m pip install -r requirements.txt
 
-# 4. Run the idempotent database migration
+# 4. Run the idempotent database migration (Stages 1–8)
 ..\.venv\Scripts\python.exe migrate.py
 
-# 5. Prepare RDD2022 pilot dataset (200 images)
-..\.venv\Scripts\python.exe prepare_rdd_dataset.py --pilot-size 200
-
-# 6. Check training estimates (dry run)
-..\.venv\Scripts\python.exe train_detector.py --dry-run
-
-# 7. Run the test suite (37 tests)
+# 5. Run the full test suite (181 tests across 9 suites)
 ..\.venv\Scripts\python.exe -m unittest discover -s tests -v
 
-# 8. Start the Flask server
-..\.venv\Scripts\python.exe app.py
+# 6. Start the server (Development or Waitress Pilot Runner)
+..\.venv\Scripts\python.exe run_pilot.py --port 5000
 ```
 
-Detailed documentation and troubleshooting steps are available in [RoadWiseAI/README.md](file:///c:/Users/sanan/OneDrive/Documents/Web%20And%20Mobile%20GIS/PROJECT/RoadWiseAI/README.md) and [RoadWiseAI/DATABASE_SETUP.md](file:///c:/Users/sanan/OneDrive/Documents/Web%20And%20Mobile%20GIS/PROJECT/RoadWiseAI/DATABASE_SETUP.md).
+Detailed documentation and guides:
+- [RoadWiseAI/README.md](RoadWiseAI/README.md): Complete architecture, features, and API reference
+- [RoadWiseAI/PILOT_GUIDE.md](RoadWiseAI/PILOT_GUIDE.md): Supervised field pilot protocol & operational workflows
+- [RoadWiseAI/RUNBOOK_WINDOWS.md](RoadWiseAI/RUNBOOK_WINDOWS.md): Windows operations runbook, service verification, backups & disaster recovery
+- [RoadWiseAI/DATABASE_SETUP.md](RoadWiseAI/DATABASE_SETUP.md): PostgreSQL 18 + PostGIS setup & migration guide
+
 
